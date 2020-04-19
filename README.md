@@ -7,7 +7,7 @@ I wish I was better at OSINT :(
 
 9012389aad4eb9be53d225c4bbe72098ebdb37b97a52893171ff1bce0d40f383
 
-I googled this hash which took me to the (UMD-CSEC github profile)[https://github.com/UMD-CSEC].  The repository only shows a single markdown document but the description has the hash so I know I'm in the right place.  I then noticed that there are 3 commits.  The second commit shows that a flag was added.  Clicking on the commit, I see that this commit has a binary file *.lol.jpg*.  I click Browse Files and the filename, I am shows a jpg that has the flag on it:  UMBDCTF-{meme_ch4llenges_ftw}
+I googled this hash which took me to the [UMD-CSEC github profile](https://github.com/UMD-CSEC).  The repository only shows a single markdown document but the description has the hash so I know I'm in the right place.  I then noticed that there are 3 commits.  The second commit shows that a flag was added.  Clicking on the commit, I see that this commit has a binary file *.lol.jpg*.  I click Browse Files and the filename, I am shows a jpg that has the flag on it:  UMBDCTF-{meme_ch4llenges_ftw}
 
 ## Santa Mysterious Box
 You're given an ELF binary called SantaBox.  The first thing I did was run *file* on it:
@@ -152,7 +152,7 @@ The flag will be in the format UMDCTF-{Country}
 
 Note: do not attempt to communicate with or contact any of the IP addresses mentioned in the challenge. The challenge can and should be solved statically.
 
-Attached was a pcap of roughly 5001 packets.  I opened it in *Wireshark* and noticed that the all of the packets seem to be nearly identical and all originate from the same place.  Looking up the address at (MXToolbox)[https://mxtoolbox.com/arin.aspx] said the IP came from the Ukraine however, that answer was not accepted.  Of course it couldn't be that easy.  I went packet to the packets and the only thing that seems to be changing among them is the TCP source port and the checksum.  I tried to discern a pattern but couldn't as it seemed the port numbers were all incremented by one and the checksums were decremented.  To be completely transparent, I mostly floundered in analyzing this and opened the pcap inside of *scapy* to analyze it.
+Attached was a pcap of roughly 5001 packets.  I opened it in *Wireshark* and noticed that the all of the packets seem to be nearly identical and all originate from the same place.  Looking up the address at [MXToolbox](https://mxtoolbox.com/arin.aspx) said the IP came from the Ukraine however, that answer was not accepted.  Of course it couldn't be that easy.  I went packet to the packets and the only thing that seems to be changing among them is the TCP source port and the checksum.  I tried to discern a pattern but couldn't as it seemed the port numbers were all incremented by one and the checksums were decremented.  To be completely transparent, I mostly floundered in analyzing this and opened the pcap inside of *scapy* to analyze it.
 
 ```
 >>> packets = rdpcap('attack.pcap')
@@ -239,14 +239,14 @@ So I know if I feed it `2 SOME_GARBAGE` strtol will return a 2 but my garbage st
   400834:       ff d2                   callq  *%rdx
 ```
 
-So if I overflow the stack and update the memory addresses, those will get loaded into *rdx* and I will jump to that location.  I hop over to (Wiremask)[https://wiremask.eu/tools/buffer-overflow-pattern-generator/?] to generate a unique pattern.  I know there are various scripts out there to do this but I kinda like the simplicity of this site.  Anyway, I grab a 100 byte pattern and try it out inside of *GDB*.  As I'm stepping through main, when prompted, I enter `2 Aa0Aa1Aa2Aa3Aa4Aa5Aa6Aa7Aa8Aa9Ab0Ab1Ab2Ab3Ab4Ab5Ab6Ab7Ab8Ab9Ac0Ac1Ac2Ac3Ac4Ac5Ac6Ac7Ac8Ac9Ad0Ad1Ad2A`.  It was an arbitrary decision to start with 2.  I then stepped down to right as it was about to `callq *%rdx` and checked to see what it holds.
+So if I overflow the stack and update the memory addresses, those will get loaded into *rdx* and I will jump to that location.  I hop over to [Wiremask](https://wiremask.eu/tools/buffer-overflow-pattern-generator/?) to generate a unique pattern.  I know there are various scripts out there to do this but I kinda like the simplicity of this site.  Anyway, I grab a 100 byte pattern and try it out inside of *GDB*.  As I'm stepping through main, when prompted, I enter `2 Aa0Aa1Aa2Aa3Aa4Aa5Aa6Aa7Aa8Aa9Ab0Ab1Ab2Ab3Ab4Ab5Ab6Ab7Ab8Ab9Ac0Ac1Ac2Ac3Ac4Ac5Ac6Ac7Ac8Ac9Ad0Ad1Ad2A`.  It was an arbitrary decision to start with 2.  I then stepped down to right as it was about to `callq *%rdx` and checked to see what it holds.
 
 ```
 (gdb) x/x $rdx
 0x4130644139634138:     Cannot access memory at address 0x4130644139634138
 ```
 
-I take 0x4130644139634138 and head back to (Wiremask)[https://wiremask.eu/tools/buffer-overflow-pattern-generator/?] and enter it for the register value. It tells me this is 86 bytes into the pattern.  So I now I need 86 byes of fluff plus the memory address of *jumpToNaboo* and I should be golden.  I build my pattern.  I floundered here quite a bit thinking I had an endianness issue with my address.  I fought for quite a bit of time trying to get the address set just right.  Out of frustration, I reached out to the designer of the problem and laid out everything I had done and he indicated I was very close but there was a small issue with my payload.  I went back to the drawing board and revisited everything ensuring I was converting everything correctly.  Consequently I found a nice way to convert my addresses to little endian and know that I did it right:
+I take 0x4130644139634138 and head back to [Wiremask](https://wiremask.eu/tools/buffer-overflow-pattern-generator/?) and enter it for the register value. It tells me this is 86 bytes into the pattern.  So I now I need 86 byes of fluff plus the memory address of *jumpToNaboo* and I should be golden.  I build my pattern.  I floundered here quite a bit thinking I had an endianness issue with my address.  I fought for quite a bit of time trying to get the address set just right.  Out of frustration, I reached out to the designer of the problem and laid out everything I had done and he indicated I was very close but there was a small issue with my payload.  I went back to the drawing board and revisited everything ensuring I was converting everything correctly.  Consequently I found a nice way to convert my addresses to little endian and know that I did it right:
 
 ```
 >>> from struct import pack
