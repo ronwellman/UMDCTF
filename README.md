@@ -50,3 +50,21 @@ I entered the code of **abcdefghijklmnop** and the strcmp shows **\\]^_`abcdefgh
 'UMDCTF-{S4nt4_gAv3_y0u_Pr3nt5}'
 ```
 
+## Question
+To read or not to read the flag... That is the question!
+
+nc 192.241.138.174 9999
+
+For this one, you connect via netcat and the terminal has already presented you with the *cat* command having already been entered.  However, it seems as most other character are not allowed.  I gave it a couple of attempts and got lucky when I remembered reading about globbing inside of bash during another CTF.
+
+```
+↳ $ nc 192.241.138.174 9999
+The flag.txt is here. Try to read it!
+> cat flag.txt
+Nope!
+> cat *
+Nope!
+> cat ????.???
+UMDCTF-{s0me_questions_h4ve_answ3rs}
+```
+
